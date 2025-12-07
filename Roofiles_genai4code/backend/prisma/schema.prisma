@@ -1,0 +1,332 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  FREE
+  PREMIUM
+  ADMIN
+}
+
+enum ContentType {
+  NEWS
+  RESEARCH
+  ENGINEERING
+  PRODUCT
+}
+
+enum ContentStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+  PUBLISHED
+}
+
+enum ChatMode {
+  RESEARCH
+  LEARNING
+}
+
+enum ApiKeyPermission {
+  READ
+  WRITE
+  ADMIN
+}
+
+enum AutomationJobType {
+  NEWS_GENERATION
+  RESEARCH_CURATION
+  GITHUB_MONITORING
+  CONTENT_AUDIT
+}
+
+enum AutomationJobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model User {
+  id                String   @id @default(cuid())
+  email             String   @unique
+  name              String?
+  avatar            String?
+  role              UserRole @default(FREE)
+  isEmailVerified   Boolean  @default(false)
+  
+  // Authentication
+  passwordHash      String?
+  googleId          String?  @unique
+  
+  // Subscription
+  subscriptionId    String?
+  subscriptionStatus String?
+  subscriptionEndsAt DateTime?
+  
+  // Usage tracking
+  dailyMessageCount Int      @default(0)
+  lastMessageReset  DateTime @default(now())
+  totalMessages     Int      @default(0)
+  
+  // Timestamps
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  lastLoginAt       DateTime?
+  
+  // Relations
+  chatSessions      ChatSession[]
+  contributions     UserContribution[]
+  feedback          UserFeedback[]
+  apiKeys           ApiKey[]
+  analyticsEvents   AnalyticsEvent[]
+  
+  @@index([email])
+  @@index([role])
+  @@index([createdAt])
+}
+
+model ContentItem {
+  id          String       @id @default(cuid())
+  title       String
+  slug        String       @unique
+  description String?
+  content     String       @db.Text
+  excerpt     String?      @db.Text
+  
+  // Content metadata
+  type        ContentType
+  status      ContentStatus @default(DRAFT)
+  category    String?
+  tags        String[]     @default([])
+  
+  // Media
+  imageUrl    String?
+  videoUrl    String?
+  externalUrl String?
+  
+  // AI metadata
+  aiModel     String?
+  aiPrompt    String?      @db.Text
+  aiConfidence Float?
+  
+  // Authorship
+  authorId    String?
+  authorName  String?
+  isAIGenerated Boolean    @default(false)
+  
+  // Engagement
+  viewCount   Int          @default(0)
+  likeCount   Int          @default(0)
+  shareCount  Int          @default(0)
+  
+  // Timestamps
+  publishedAt DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  
+  // Relations
+  contributions UserContribution[]
+  feedback      UserFeedback[]
+  
+  @@index([type, status])
+  @@index([slug])
+  @@index([createdAt])
+  @@index([publishedAt])
+}
+
+model ChatSession {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String?
+  mode      ChatMode @default(RESEARCH)
+  
+  // AI configuration
+  aiModel   String?
+  systemPrompt String? @db.Text
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  ChatMessage[]
+  
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  role      String   // 'user' or 'assistant'
+  content   String   @db.Text
+  
+  // AI metadata
+  aiModel   String?
+  tokensUsed Int?
+  cost      Float?
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  
+  // Relations
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  @@index([sessionId])
+  @@index([createdAt])
+}
+
+model UserContribution {
+  id          String   @id @default(cuid())
+  userId      String
+  contentId   String?
+  
+  // Contribution details
+  title       String
+  description String?  @db.Text
+  type        ContentType
+  category    String?
+  tags        String[] @default([])
+  externalUrl String?
+  
+  // Status
+  status      ContentStatus @default(PENDING)
+  adminNotes  String?  @db.Text
+  
+  // Timestamps
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relations
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content     ContentItem? @relation(fields: [contentId], references: [id])
+  
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model UserFeedback {
+  id          String   @id @default(cuid())
+  userId      String
+  contentId   String?
+  
+  // Feedback details
+  rating      Int?     // 1-5 stars
+  comment     String?  @db.Text
+  feedbackType String? // 'like', 'dislike', 'report'
+  
+  // Timestamps
+  createdAt   DateTime @default(now())
+  
+  // Relations
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content     ContentItem? @relation(fields: [contentId], references: [id])
+  
+  @@index([userId])
+  @@index([contentId])
+  @@index([createdAt])
+}
+
+model ApiKey {
+  id          String           @id @default(cuid())
+  userId      String
+  name        String
+  keyHash     String           @unique
+  permissions ApiKeyPermission @default(READ)
+  
+  // Usage tracking
+  usageCount  Int              @default(0)
+  lastUsedAt  DateTime?
+  isActive    Boolean          @default(true)
+  
+  // Timestamps
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  
+  // Relations
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([keyHash])
+  @@index([isActive])
+}
+
+model AiModel {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  provider    String   // 'deepseek', 'openrouter', etc.
+  modelId     String   // The actual model identifier
+  description String?
+  
+  // Configuration
+  isActive    Boolean  @default(true)
+  isFreeTier  Boolean  @default(false)
+  maxTokens   Int      @default(2000)
+  temperature Float    @default(0.7)
+  
+  // Cost tracking
+  costPer1KInput  Float?   // Cost per 1K input tokens
+  costPer1KOutput Float?   // Cost per 1K output tokens
+  
+  // Timestamps
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([isActive])
+  @@index([isFreeTier])
+}
+
+model AutomationJob {
+  id          String              @id @default(cuid())
+  jobType     AutomationJobType
+  status      AutomationJobStatus @default(PENDING)
+  
+  // Job details
+  payload     Json?               @db.JsonB
+  result      Json?               @db.JsonB
+  error       String?             @db.Text
+  
+  // Timestamps
+  scheduledAt DateTime?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  
+  @@index([jobType])
+  @@index([status])
+  @@index([createdAt])
+  @@index([scheduledAt])
+}
+
+model AnalyticsEvent {
+  id          String   @id @default(cuid())
+  userId      String?
+  eventType   String   // 'page_view', 'chat_message', 'content_view', etc.
+  
+  // Event details
+  eventData   Json?    @db.JsonB
+  sessionId   String?
+  ipAddress   String?
+  userAgent   String?
+  
+  // Timestamps
+  createdAt   DateTime @default(now())
+  
+  // Relations
+  user        User?    @relation(fields: [userId], references: [id])
+  
+  @@index([userId])
+  @@index([eventType])
+  @@index([createdAt])
+}
